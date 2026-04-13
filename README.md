@@ -52,6 +52,12 @@ Out of scope：
    - `outputs/<project>/draft_<timestamp>.mp4`
 5. 阅读 `docs/pipeline-spec.md`，确认配置文件字段，再开始实现 `src/` 中的模块。
 
+### Configuration Entry Points
+
+- **配置文件**：推荐做法。传入 `--config configs/sample_job.yaml`，文件里描述 job、输入路径、打分权重、导出参数，便于版本化。
+- **命令行覆盖**：重要参数都应提供 CLI flags，例如 `--inputs.footage_glob`, `--timeline.target_duration_s`, `--export.resolution`。CLI 传参覆盖配置文件中的同名值，方便快速试验。
+- **组合策略**：保持“文件为主、CLI 为增量覆盖”的原则，`docs/pipeline-spec.md` 中的所有键都要在 CLI 中有对应 flag，默认读取配置文件，未传入时沿用文件值。
+
 ## Roadmap（Rolling）
 
 1. **MVP 0.1**：CLI 骨架、配置加载、日志模块 → 2026-04-20。
