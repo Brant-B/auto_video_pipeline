@@ -58,6 +58,18 @@ Out of scope：
 - **命令行覆盖**：重要参数都应提供 CLI flags，例如 `--inputs.footage_glob`, `--timeline.target_duration_s`, `--export.resolution`。CLI 传参覆盖配置文件中的同名值，方便快速试验。
 - **组合策略**：保持“文件为主、CLI 为增量覆盖”的原则，`docs/pipeline-spec.md` 中的所有键都要在 CLI 中有对应 flag，默认读取配置文件，未传入时沿用文件值。
 
+### Run Locally
+
+```bash
+python -m auto_video_pipeline.cli run --config configs/sample_job.yaml --dry-run
+```
+
+常用覆盖示例：
+
+- 只切换素材路径：`... --inputs.footage_glob \"inputs/raw/new_project/*.mp4\"`
+- 调整导出参数：`... --export.resolution 3840x2160 --export.fps 30`
+- 修改时长与转场：`... --timeline.target_duration_s 45 --timeline.transition dip`
+
 ## Roadmap（Rolling）
 
 1. **MVP 0.1**：CLI 骨架、配置加载、日志模块 → 2026-04-20。

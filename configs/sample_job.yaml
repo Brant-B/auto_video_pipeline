@@ -1,0 +1,27 @@
+job:
+  name: sample_job
+  environment: local
+inputs:
+  footage_glob: "inputs/raw/demo_project/*.mp4"
+  music_manifest: "inputs/manifests/music_catalog.yaml"
+timeline:
+  target_duration_s: 60
+  transition: crossfade
+scoring:
+  min_score: 0.4
+  weights:
+    length: 0.3
+    tag_match: 0.5
+    motion: 0.2
+profile:
+  mandatory_tags: ["hero", "product"]
+music:
+  bpm_range: [95, 110]
+  mood: ["uplifting", "energetic"]
+  ducking:
+    lufs: -14
+export:
+  resolution: "1920x1080"
+  fps: 25
+  video_bitrate: "12M"
+  audio_codec: "aac"
