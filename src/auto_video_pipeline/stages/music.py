@@ -63,6 +63,7 @@ def plan_music(config: PipelineConfig, timeline_duration_s: int) -> Optional[Mus
         mood=track.get("mood", []),
         fade_in_ms=400,
         fade_out_ms=400,
+        duration_s=track.get("duration"),
     )
     logger.info(
         "Selected track %s (bpm=%s mood=%s) for target duration %ss",

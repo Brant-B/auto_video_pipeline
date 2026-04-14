@@ -105,9 +105,11 @@ def run(  # noqa: D401 - Typer generates help text.
         export_fps=export_fps,
     )
     pipeline_config = build_pipeline_config(config, overrides)
-    output = run_pipeline(pipeline_config, dry_run=dry_run)
-    if output:
-        console.print(f"[green]Pipeline completed. Output: {output}[/green]")
+    outputs = run_pipeline(pipeline_config, dry_run=dry_run)
+    if outputs:
+        for path in outputs:
+            console.print(f"[green]Produced: {path}[/green]")
+        console.print(f"[green]Pipeline completed. {len(outputs)} video(s) produced.[/green]")
     else:
         console.print("[yellow]Pipeline finished without generating output.[/yellow]")
 

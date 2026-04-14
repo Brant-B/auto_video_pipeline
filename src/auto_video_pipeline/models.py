@@ -33,6 +33,7 @@ class MusicPlan:
     start_offset_s: float = 0.0
     fade_in_ms: int = 400
     fade_out_ms: int = 400
+    duration_s: Optional[float] = None
 
 
 @dataclass(slots=True)
@@ -42,3 +43,5 @@ class TimelinePlan:
     clips: List[Dict[str, float]] = field(default_factory=list)
     transitions: List[str] = field(default_factory=list)
     music: Optional[MusicPlan] = None
+    video_index: int = 0
+    video_total: int = 1

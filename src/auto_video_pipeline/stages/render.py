@@ -12,11 +12,10 @@ from typing import List, Optional
 import yaml
 
 from ..config import ExportConfig, PipelineConfig
-from ..models import TimelinePlan
+from ..models import MusicPlan, TimelinePlan
+from .timeline import CROSSFADE_S
 
 logger = logging.getLogger(__name__)
-
-CROSSFADE_S = 0.5  # seconds of overlap between clips
 
 
 def _build_filter_complex(
@@ -25,29 +24,31 @@ def _build_filter_complex(
     transition: str,
     width: int,
     height: int,
+    music: Optional[MusicPlan] = None,
+    output_duration: float = 0.0,
 ) -> str:
     """Build the complete ffmpeg filter_complex for video + audio."""
     transition = transition.lower()
     cf = CROSSFADE_S if transition in ("crossfade", "dip") else 0.0
-    trim_d = [d - cf for d in clip_durations]
+    # Use full slot durations — xfade handles the overlap internally.
+    # Timeline already accounted for crossfade loss in slot allocation.
 
     lines: List[str] = []
-    fps = 25  # fixed output fps for constant frame rate
+    fps = 25
 
-    # --- Video: scale + trim each input clip ---
-    for i, td in enumerate(trim_d):
+    # --- Video: scale + trim each input clip (keep aspect ratio, crop if needed) ---
+    for i, td in enumerate(clip_durations):
         lines.append(
             f"[{i}:v]trim=0:{td:.3f},setpts=PTS-STARTPTS,fps={fps},"
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{i}]"
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1[v{i}]"
         )
 
     # --- Video: concatenate / transition ---
     if transition in ("crossfade", "dip") and num_clips > 1:
         xfade_type = "fade" if transition == "crossfade" else "dip"
-        # For chained xfade, offset = cumulative output duration - cf.
-        # After each xfade, cumulative += trim_d[next] - cf.
-        cumulative = trim_d[0]
+        # offset = cumulative output so far - cf
+        cumulative = clip_durations[0]
         for i in range(num_clips - 1):
             offset = cumulative - cf
             in1 = f"v{i:02d}" if i > 0 else "v0"
@@ -57,26 +58,40 @@ def _build_filter_complex(
                 f"[{in1}][{in2}]xfade=transition={xfade_type}"
                 f":duration={cf}:offset={offset:.3f}[{out}]"
             )
-            cumulative += trim_d[i + 1] - cf
+            cumulative += clip_durations[i + 1] - cf
         lines.append(f"[v{num_clips - 1:02d}]null[out]")
     elif num_clips > 1:
-        # cut mode: simple concat
         v_ins = "".join(f"[v{i}]" for i in range(num_clips))
         lines.append(f"{v_ins}concat=n={num_clips}:v=1:a=0[out]")
     else:
         lines.append("[v0]null[out]")
 
-    # --- Audio: mix all clip audio streams ---
-    a_ins = "".join(f"[{i}:a]" for i in range(num_clips))
-    lines.append(
-        f"{a_ins}amix=inputs={num_clips}:duration=longest:dropout_transition=0[aout]"
-    )
+    # --- Audio ---
+    bgm_input_idx = num_clips  # BGM file is the next input after all clips
+
+    if music and music.file_path.exists():
+        # BGM as primary audio: trim to video duration, fade in/out
+        fade_in_s = music.fade_in_ms / 1000.0
+        fade_out_s = music.fade_out_ms / 1000.0
+        fade_out_start = max(output_duration - fade_out_s, fade_in_s)
+        lines.append(
+            f"[{bgm_input_idx}:a]atrim=0:{output_duration:.3f},asetpts=PTS-STARTPTS,"
+            f"afade=t=in:st=0:d={fade_in_s:.2f},"
+            f"afade=t=out:st={fade_out_start:.2f}:d={fade_out_s:.2f},"
+            f"volume=0.7[aout]"
+        )
+    else:
+        # No BGM: mix clip audios
+        a_ins = "".join(f"[{i}:a]" for i in range(num_clips))
+        lines.append(
+            f"{a_ins}amix=inputs={num_clips}:duration=longest"
+            f":dropout_transition=0[aout]"
+        )
 
     return ";\n".join(lines)
 
 
 def _parse_resolution(resolution: str) -> tuple[int, int]:
-    """Parse '1920x1080' into (1920, 1080)."""
     parts = resolution.lower().split("x")
     return int(parts[0]), int(parts[1])
 
@@ -94,17 +109,20 @@ def export_draft(
     job_dir = output_dir / f"run-{timestamp}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Always persist metadata artifacts ---
     _write_artifacts(job_dir, config, timeline)
 
-    video_path = job_dir / "draft.mp4"
+    # Output filename: draft_001.mp4 for multi-video, draft.mp4 for single
+    if timeline.video_total > 1:
+        idx = timeline.video_index + 1
+        video_path = job_dir / f"draft_{idx:03d}.mp4"
+    else:
+        video_path = job_dir / "draft.mp4"
 
     if dry_run:
         video_path.write_text("Dry run - video not rendered.\n", encoding="utf-8")
         logger.info("Dry run complete. Artifacts in %s", job_dir)
         return video_path
 
-    # --- Build and run ffmpeg ---
     clips = timeline.clips
     if not clips:
         raise ValueError("No clips in timeline to render.")
@@ -116,18 +134,34 @@ def export_draft(
     clip_paths = [c["path"] for c in clips]
 
     w, h = _parse_resolution(config.export.resolution)
+
+    # Calculate actual output duration for BGM trimming
+    cf = CROSSFADE_S if transition in ("crossfade", "dip") else 0.0
+    output_duration = (
+        sum(clip_durations) - (len(clips) - 1) * cf
+        if len(clips) > 1 else
+        (clip_durations[0] if clip_durations else 0)
+    )
+
+    music = timeline.music
     filter_complex = _build_filter_complex(
         num_clips=len(clips),
         clip_durations=clip_durations,
         transition=transition,
         width=w,
         height=h,
+        music=music,
+        output_duration=output_duration,
     )
 
     # ffmpeg command
     cmd = ["ffmpeg", "-y"]
     for p in clip_paths:
         cmd += ["-i", p]
+    # Add BGM as additional input if available
+    if music and music.file_path.exists():
+        cmd += ["-i", str(music.file_path)]
+
     cmd += ["-filter_complex", filter_complex]
     cmd += ["-map", "[out]", "-map", "[aout]"]
     cmd += [
@@ -148,7 +182,6 @@ def export_draft(
         "Rendering %d clips (transition=%s, %dx%d) -> %s",
         len(clips), transition, w, h, video_path,
     )
-    logger.debug("ffmpeg filter_complex:\n%s", filter_complex)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -170,12 +203,13 @@ def _write_artifacts(
     config: PipelineConfig,
     timeline: TimelinePlan,
 ) -> None:
-    """Write timeline.json and config.snapshot.yaml."""
     timeline_data = {
         "duration_s": timeline.duration_s,
         "clips": timeline.clips,
         "transitions": timeline.transitions,
         "music": timeline.music.track_id if timeline.music else None,
+        "video_index": timeline.video_index,
+        "video_total": timeline.video_total,
     }
     (job_dir / "timeline.json").write_text(
         json.dumps(timeline_data, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -192,7 +226,6 @@ def _write_diagnostics(
     returncode: int,
     stderr: Optional[str],
 ) -> None:
-    """Write diagnostics.md with render results."""
     lines = [
         "# Diagnostics\n",
         f"- clips: {num_clips}",

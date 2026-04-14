@@ -212,7 +212,8 @@ __marimo__/
 outputs/
 inputs/raw/
 inputs/music/
-inputs/manifests/
+inputs/manifests/*
+!inputs/manifests/music_catalog.yaml
 
 # Video / audio media files (should live in inputs/, not repo)
 *.MOV

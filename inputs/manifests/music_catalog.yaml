@@ -1,0 +1,5 @@
+- id: bgm1
+  bpm: null
+  mood: [upbeat, food]
+  duration: 20.0
+  file: inputs/music/bgm1.mp3

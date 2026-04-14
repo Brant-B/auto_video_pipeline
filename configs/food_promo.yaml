@@ -5,8 +5,9 @@ inputs:
   footage_glob: "inputs/raw/美食推广/*.MOV"
   music_manifest: "inputs/manifests/music_catalog.yaml"
 timeline:
-  target_duration_s: 60
+  target_duration_s: 16
   transition: crossfade
+  clips_per_video: 8
 scoring:
   min_score: 0.3
   weights:
@@ -21,7 +22,7 @@ music:
   ducking:
     lufs: -14
 export:
-  resolution: "1920x1080"
+  resolution: "1080x1920"
   fps: 25
   video_bitrate: "12M"
   audio_codec: "aac"

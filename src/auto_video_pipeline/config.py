@@ -23,6 +23,7 @@ class InputsConfig(BaseModel):
 class TimelineConfig(BaseModel):
     target_duration_s: int = Field(90, ge=1, description="Desired output length in seconds.")
     transition: Literal["cut", "crossfade", "dip"] = "cut"
+    clips_per_video: int = Field(0, ge=0, description="Clips per output video. 0 = all in one.")
 
 
 class ScoringWeightConfig(BaseModel):
