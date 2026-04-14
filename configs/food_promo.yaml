@@ -1,0 +1,27 @@
+job:
+  name: 美食推广_001
+  environment: local
+inputs:
+  footage_glob: "inputs/raw/美食推广/*.MOV"
+  music_manifest: "inputs/manifests/music_catalog.yaml"
+timeline:
+  target_duration_s: 60
+  transition: crossfade
+scoring:
+  min_score: 0.3
+  weights:
+    length: 0.3
+    tag_match: 0.3
+    motion: 0.4
+profile:
+  mandatory_tags: []
+music:
+  bpm_range: null
+  mood: []
+  ducking:
+    lufs: -14
+export:
+  resolution: "1920x1080"
+  fps: 25
+  video_bitrate: "12M"
+  audio_codec: "aac"

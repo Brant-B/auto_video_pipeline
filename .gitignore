@@ -1,3 +1,5 @@
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -211,3 +213,14 @@ outputs/
 inputs/raw/
 inputs/music/
 inputs/manifests/
+
+# Video / audio media files (should live in inputs/, not repo)
+*.MOV
+*.mov
+*.mp4
+*.wav
+*.mp3
+*.aac
+
+# Claude Code session files
+.claude/
