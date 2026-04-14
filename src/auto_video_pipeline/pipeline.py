@@ -7,14 +7,15 @@ from pathlib import Path
 from typing import List, Optional
 
 from .config import PipelineConfig
+from .models import ShotMetadata
 from .stages import asset_intake, music, render, scoring, timeline
 
 logger = logging.getLogger(__name__)
 
 
 def _partition_shots(
-    shots: List, clips_per_video: int
-) -> List[List]:
+    shots: List[ShotMetadata], clips_per_video: int
+) -> List[List[ShotMetadata]]:
     """Split shots into evenly-sized groups. Avoids tiny leftover groups."""
     n = len(shots)
     if n <= clips_per_video or clips_per_video <= 0:
@@ -24,13 +25,43 @@ def _partition_shots(
     base = n // num_groups
     extra = n % num_groups
 
-    groups = []
+    groups: List[List[ShotMetadata]] = []
     idx = 0
     for g in range(num_groups):
         size = base + (1 if g < extra else 0)
         groups.append(shots[idx : idx + size])
         idx += size
     return groups
+
+
+def _promote_interaction_shot(
+    shots: List[ShotMetadata], keywords: List[str]
+) -> List[ShotMetadata]:
+    """Move the highest-scoring interaction shot to the front of the list."""
+    if not keywords:
+        return shots
+
+    # Find interaction shots
+    interaction_shots = []
+    for shot in shots:
+        name = shot.path.stem  # filename without extension
+        if any(kw in name for kw in keywords):
+            interaction_shots.append(shot)
+
+    if not interaction_shots:
+        logger.debug("No interaction shots found for keywords %s", keywords)
+        return shots
+
+    # Pick highest scoring interaction shot
+    best = max(interaction_shots, key=lambda s: s.score or 0.0)
+    logger.info(
+        "Promoted interaction shot to front: %s (score=%.3f)",
+        best.path.name, best.score
+    )
+
+    # Remove from original position and insert at front
+    result = [s for s in shots if s.path != best.path]
+    return [best] + result
 
 
 def run_pipeline(
@@ -57,6 +88,17 @@ def run_pipeline(
 
     outputs: List[Path] = []
     for idx, group in enumerate(groups):
+        # Promote interaction shot to front if keywords are configured
+        group = _promote_interaction_shot(group, config.interaction.keywords)
+
+        # Pick subtitle for this video (index matches group order)
+        subtitle_text: Optional[str] = None
+        subtitle_position = "bottom"
+        if idx < len(config.subtitles):
+            subtitle_text = config.subtitles[idx].text
+            subtitle_position = config.subtitles[idx].position
+            logger.info("Video %d subtitle: %s", idx + 1, subtitle_text)
+
         group_duration = config.timeline.target_duration_s
         music_plan = music.plan_music(config, group_duration)
 
@@ -64,6 +106,8 @@ def run_pipeline(
             config, group, music_plan,
             video_index=idx,
             video_total=video_total,
+            subtitle=subtitle_text,
+            subtitle_position=subtitle_position,
         )
 
         output_path = render.export_draft(config, timeline_plan, dry_run=dry_run)

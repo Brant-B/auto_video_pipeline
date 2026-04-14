@@ -17,6 +17,20 @@ from .timeline import CROSSFADE_S
 
 logger = logging.getLogger(__name__)
 
+# macOS system font for Chinese subtitles
+MACOS_CHINESE_FONT = "/System/Library/Fonts/STHeiti Light.ttc"
+
+
+def _subtitle_y(position: str, height: int) -> str:
+    """Return ffmpeg Y expression for subtitle vertical position."""
+    # Use percentage of height for safe area (avoids edge cutoff)
+    if position == "bottom":
+        return f"(H*88)/100"  # 88% from top = 12% from bottom
+    elif position == "center":
+        return "(H-text_h)/2"
+    else:  # top
+        return "(H*8)/100"
+
 
 def _build_filter_complex(
     num_clips: int,
@@ -26,17 +40,17 @@ def _build_filter_complex(
     height: int,
     music: Optional[MusicPlan] = None,
     output_duration: float = 0.0,
+    subtitle: Optional[str] = None,
+    subtitle_position: str = "bottom",
 ) -> str:
-    """Build the complete ffmpeg filter_complex for video + audio."""
+    """Build the complete ffmpeg filter_complex for video + audio + subtitle."""
     transition = transition.lower()
     cf = CROSSFADE_S if transition in ("crossfade", "dip") else 0.0
-    # Use full slot durations — xfade handles the overlap internally.
-    # Timeline already accounted for crossfade loss in slot allocation.
 
     lines: List[str] = []
     fps = 25
 
-    # --- Video: scale + trim each input clip (keep aspect ratio, crop if needed) ---
+    # --- Video: scale + trim each input clip ---
     for i, td in enumerate(clip_durations):
         lines.append(
             f"[{i}:v]trim=0:{td:.3f},setpts=PTS-STARTPTS,fps={fps},"
@@ -44,10 +58,9 @@ def _build_filter_complex(
             f"crop={width}:{height},setsar=1[v{i}]"
         )
 
-    # --- Video: concatenate / transition ---
+    # --- Video: concatenate / transition → output label [vout] ---
     if transition in ("crossfade", "dip") and num_clips > 1:
         xfade_type = "fade" if transition == "crossfade" else "dip"
-        # offset = cumulative output so far - cf
         cumulative = clip_durations[0]
         for i in range(num_clips - 1):
             offset = cumulative - cf
@@ -59,18 +72,35 @@ def _build_filter_complex(
                 f":duration={cf}:offset={offset:.3f}[{out}]"
             )
             cumulative += clip_durations[i + 1] - cf
-        lines.append(f"[v{num_clips - 1:02d}]null[out]")
+        lines.append(f"[v{num_clips - 1:02d}]null[vout]")
     elif num_clips > 1:
         v_ins = "".join(f"[v{i}]" for i in range(num_clips))
-        lines.append(f"{v_ins}concat=n={num_clips}:v=1:a=0[out]")
+        lines.append(f"{v_ins}concat=n={num_clips}:v=1:a=0[vout]")
     else:
-        lines.append("[v0]null[out]")
+        lines.append("[v0]null[vout]")
+
+    # --- Subtitle overlay on video ---
+    if subtitle:
+        y_expr = _subtitle_y(subtitle_position, height)
+        # Escape single quotes in subtitle text for ffmpeg
+        escaped = subtitle.replace("'", "'\\''")
+        lines.append(
+            f"[vout]drawtext=text='{escaped}':"
+            f"fontfile={MACOS_CHINESE_FONT}:"
+            f"fontsize={max(width // 20, 40)}:"
+            f"fontcolor=white:"
+            f"borderw=4:bordercolor=black@0.8:"
+            f"x=(w-text_w)/2:"
+            f"y={y_expr}:"
+            f"[vout_sub]"
+        )
+        # For clean output reference
+        lines.append("[vout_sub]null[vout]")
 
     # --- Audio ---
-    bgm_input_idx = num_clips  # BGM file is the next input after all clips
+    bgm_input_idx = num_clips
 
     if music and music.file_path.exists():
-        # BGM as primary audio: trim to video duration, fade in/out
         fade_in_s = music.fade_in_ms / 1000.0
         fade_out_s = music.fade_out_ms / 1000.0
         fade_out_start = max(output_duration - fade_out_s, fade_in_s)
@@ -81,7 +111,6 @@ def _build_filter_complex(
             f"volume=0.7[aout]"
         )
     else:
-        # No BGM: mix clip audios
         a_ins = "".join(f"[{i}:a]" for i in range(num_clips))
         lines.append(
             f"{a_ins}amix=inputs={num_clips}:duration=longest"
@@ -111,7 +140,6 @@ def export_draft(
 
     _write_artifacts(job_dir, config, timeline)
 
-    # Output filename: draft_001.mp4 for multi-video, draft.mp4 for single
     if timeline.video_total > 1:
         idx = timeline.video_index + 1
         video_path = job_dir / f"draft_{idx:03d}.mp4"
@@ -135,7 +163,6 @@ def export_draft(
 
     w, h = _parse_resolution(config.export.resolution)
 
-    # Calculate actual output duration for BGM trimming
     cf = CROSSFADE_S if transition in ("crossfade", "dip") else 0.0
     output_duration = (
         sum(clip_durations) - (len(clips) - 1) * cf
@@ -152,18 +179,18 @@ def export_draft(
         height=h,
         music=music,
         output_duration=output_duration,
+        subtitle=timeline.subtitle,
+        subtitle_position=timeline.subtitle_position,
     )
 
-    # ffmpeg command
     cmd = ["ffmpeg", "-y"]
     for p in clip_paths:
         cmd += ["-i", p]
-    # Add BGM as additional input if available
     if music and music.file_path.exists():
         cmd += ["-i", str(music.file_path)]
 
     cmd += ["-filter_complex", filter_complex]
-    cmd += ["-map", "[out]", "-map", "[aout]"]
+    cmd += ["-map", "[vout]", "-map", "[aout]"]
     cmd += [
         "-c:v", "libx264",
         "-preset", "fast",
@@ -178,22 +205,26 @@ def export_draft(
         str(video_path),
     ]
 
+    subtitle_info = f", subtitle='{timeline.subtitle}'" if timeline.subtitle else ""
     logger.info(
-        "Rendering %d clips (transition=%s, %dx%d) -> %s",
-        len(clips), transition, w, h, video_path,
+        "Rendering %d clips (transition=%s, %dx%d%s) -> %s",
+        len(clips), transition, w, h, subtitle_info, video_path,
     )
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        _write_diagnostics(job_dir, len(clips), transition, result.returncode, result.stderr)
+        _write_diagnostics(
+            job_dir, len(clips), transition, timeline.subtitle,
+            result.returncode, result.stderr,
+        )
         logger.error("ffmpeg failed (code %d):\n%s", result.returncode, result.stderr[-2000:])
         raise RuntimeError(
             f"ffmpeg rendering failed (code {result.returncode}). "
             f"See {job_dir / 'diagnostics.md'}"
         )
 
-    _write_diagnostics(job_dir, len(clips), transition, 0, None)
+    _write_diagnostics(job_dir, len(clips), transition, timeline.subtitle, 0, None)
     logger.info("Render complete: %s", video_path)
     return video_path
 
@@ -210,6 +241,7 @@ def _write_artifacts(
         "music": timeline.music.track_id if timeline.music else None,
         "video_index": timeline.video_index,
         "video_total": timeline.video_total,
+        "subtitle": timeline.subtitle,
     }
     (job_dir / "timeline.json").write_text(
         json.dumps(timeline_data, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -223,6 +255,7 @@ def _write_diagnostics(
     job_dir: Path,
     num_clips: int,
     transition: str,
+    subtitle: Optional[str],
     returncode: int,
     stderr: Optional[str],
 ) -> None:
@@ -230,6 +263,7 @@ def _write_diagnostics(
         "# Diagnostics\n",
         f"- clips: {num_clips}",
         f"- transition: {transition}",
+        f"- subtitle: {subtitle or '(none)'}",
         f"- ffmpeg_returncode: {returncode}",
     ]
     if stderr:

@@ -21,6 +21,20 @@ music:
   mood: []
   ducking:
     lufs: -14
+subtitles:
+  - text: "男团打卡网红餐厅"
+    position: bottom
+  - text: "超人气美食推荐"
+    position: bottom
+  - text: "地道风味等你来"
+    position: bottom
+interaction:
+  keywords:
+    - "捧杯"
+    - "剥虾"
+    - "捶背"
+    - "喂"
+    - "跳舞"
 export:
   resolution: "1080x1920"
   fps: 25

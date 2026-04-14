@@ -51,6 +51,15 @@ class MusicConfig(BaseModel):
     ducking: MusicDuckingConfig = MusicDuckingConfig()
 
 
+class SubtitleConfig(BaseModel):
+    text: str = ""
+    position: Literal["top", "center", "bottom"] = "bottom"
+
+
+class InteractionConfig(BaseModel):
+    keywords: List[str] = Field(default_factory=list)
+
+
 class ExportConfig(BaseModel):
     resolution: str = "1920x1080"
     fps: int = 25
@@ -65,6 +74,8 @@ class PipelineConfig(BaseModel):
     scoring: ScoringConfig = ScoringConfig()
     profile: ProfileConfig = ProfileConfig()
     music: MusicConfig = MusicConfig()
+    subtitles: List[SubtitleConfig] = Field(default_factory=list)
+    interaction: InteractionConfig = InteractionConfig()
     export: ExportConfig = ExportConfig()
 
     def snapshot(self) -> Dict[str, Any]:

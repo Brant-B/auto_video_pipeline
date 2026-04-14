@@ -20,6 +20,8 @@ def compose_timeline(
     music: MusicPlan | None,
     video_index: int = 0,
     video_total: int = 1,
+    subtitle: str | None = None,
+    subtitle_position: str = "bottom",
 ) -> TimelinePlan:
     if not shots:
         raise ValueError("Timeline requires at least one shot.")
@@ -65,6 +67,8 @@ def compose_timeline(
         music=music,
         video_index=video_index,
         video_total=video_total,
+        subtitle=subtitle,
+        subtitle_position=subtitle_position,
     )
     logger.info(
         "Timeline %d/%d composed: %d clips, ~%.1fs (transition=%s)",

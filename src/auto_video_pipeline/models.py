@@ -45,3 +45,5 @@ class TimelinePlan:
     music: Optional[MusicPlan] = None
     video_index: int = 0
     video_total: int = 1
+    subtitle: Optional[str] = None
+    subtitle_position: str = "bottom"
