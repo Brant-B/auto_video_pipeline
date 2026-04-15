@@ -26,13 +26,9 @@ def compose_timeline(
     if not shots:
         raise ValueError("Timeline requires at least one shot.")
 
-    ordered = sorted(
-        shots,
-        key=lambda shot: (shot.score or 0.0, shot.scene, shot.take),
-        reverse=True,
-    )
-
-    num_clips = len(ordered)
+    # Use shots in the order given by pipeline (interaction-first, then by score).
+    # No re-sorting here — the pipeline owns ordering decisions.
+    num_clips = len(shots)
     transition = config.timeline.transition
     overlap = CROSSFADE_S if transition in ("crossfade", "dip") else 0.0
 
@@ -44,7 +40,7 @@ def compose_timeline(
 
     clips = []
     time_cursor = 0.0
-    for shot in ordered:
+    for shot in shots:
         actual_out = min(shot.duration_s or clip_duration, clip_duration)
         clip_entry = {
             "path": str(shot.path),
